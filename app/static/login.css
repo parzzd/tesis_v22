@@ -1,0 +1,199 @@
+:root {
+  --bg: #0F172A;
+  --panel: #1E293B;
+  --card: #111827;
+  --mut: #94A3B8;
+  --txt: #F8FAFC;
+  --b: #334155;
+  --btn: #0284C7;
+  --accent: #38BDF8;
+}
+
+* { box-sizing: border-box }
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, Segoe UI, Roboto, Arial;
+  background: var(--bg);
+  color: var(--txt);
+}
+
+/* ===========================
+   LAYOUT
+=========================== */
+.wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(80% 60% at 50% 10%, #1E293B 0%, #0F172A 62%);
+  padding: clamp(12px, 3vw, 24px);
+}
+
+.shell {
+  width: min(100%, 520px);
+  background: rgba(30, 41, 59, .86);
+  border: 1px solid var(--b);
+  border-radius: 18px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+  padding: 28px;
+  min-width: 0;
+}
+
+/* ===========================
+   LOGO / HEADINGS
+=========================== */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  display: grid;
+  place-items: center;
+}
+
+h1 {
+  font-size: 28px;
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+h2 {
+  margin: 12px 0 14px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* ===========================
+   FORM
+=========================== */
+label {
+  display: block;
+  margin: 10px 0 6px;
+  color: var(--mut);
+  font-size: 13px;
+}
+
+.in {
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--b);
+  color: var(--txt);
+  outline: none;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.mut { color: var(--mut); font-size: 13px }
+.row > a,
+.remember-label {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.btn {
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 12px;
+  background: var(--btn);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn:disabled { opacity: .6; cursor: not-allowed }
+
+.foot { text-align: right; margin-top: 10px }
+
+a { color: var(--accent); text-decoration: none }
+
+/* ===========================
+   ERROR BOX
+=========================== */
+.err {
+  display: none;
+  margin-bottom: 10px;
+  background: #3a1116;
+  border: 1px solid #6b1f28;
+  color: #ffb4b8;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.err.okbox {
+  background: #052e16;
+  border-color: #166534;
+  color: #bbf7d0;
+}
+
+/* ===========================
+   REMEMBER / CHECKBOX
+=========================== */
+.remember-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.remember-label input {
+  accent-color: var(--accent);
+}
+
+/* ===========================
+   REGISTRATION BOX
+=========================== */
+#regBox {
+  display: none;
+  margin-top: 25px;
+  padding-top: 20px;
+  border-top: 1px solid var(--b);
+}
+
+.role-fields { display: none }
+
+.mt-12 { margin-top: 12px }
+.mt-14 { margin-top: 14px }
+
+/* ===========================
+   RESPONSIVE
+=========================== */
+@media (max-width: 768px) {
+  .shell { padding: 20px }
+  h1 { font-size: 24px }
+  .row { align-items: center }
+  .foot { text-align: left }
+}
+
+@media (max-width: 460px) {
+  .shell { padding: 18px }
+  .row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .row > a,
+  .remember-label {
+    flex: 1 1 auto;
+  }
+}

@@ -1,0 +1,66 @@
+:root {
+  --bg: #0F172A;
+  --panel: #1E293B;
+  --card: #111827;
+  --mut: #94A3B8;
+  --txt: #F8FAFC;
+  --b: #334155;
+  --btn: #0284C7;
+}
+
+* { box-sizing: border-box }
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, Segoe UI, Roboto, Arial;
+  background: var(--bg);
+  color: var(--txt);
+}
+
+.wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(80% 60% at 50% 10%, #1E293B 0%, #0F172A 62%);
+}
+
+.shell {
+  width: min(92vw, 480px);
+  background: rgba(30, 41, 59, .86);
+  border: 1px solid var(--b);
+  border-radius: 18px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+  padding: 32px;
+  text-align: center;
+}
+
+h1 {
+  font-size: 26px;
+  margin: 0 0 10px;
+  font-weight: 800;
+}
+
+p {
+  margin: 8px 0;
+  font-size: 15px;
+  color: var(--mut);
+}
+
+.timer {
+  font-size: 34px;
+  font-weight: 700;
+  margin: 18px 0;
+  color: #ff6b6b;
+  letter-spacing: 1px;
+}
+
+.btn {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 12px;
+  background: var(--btn);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn:disabled { opacity: .6; cursor: not-allowed }

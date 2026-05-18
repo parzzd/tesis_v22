@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Panel de Jefe - Sicher</title>
+<link rel="stylesheet" href="/static/admin.css?v=mobile-dropdown-nav-20260517"/>
+<script src="/config.js"></script>
+</head>
+
+<body>
+
+<aside id="adminSidebar">
+  <div class="brand">
+    <h2>Panel de Jefe</h2>
+    <p id="usuarioHeader">-</p>
+  </div>
+
+  <nav class="navItems">
+    <button class="item active" data-tab="usuarios" onclick="showTab(this,'usuarios')">Usuarios</button>
+    <button class="item" data-tab="camaras" onclick="showTab(this,'camaras')">Camaras</button>
+    <button class="item" data-tab="alertas" onclick="showTab(this,'alertas')">Alertas</button>
+    <button class="item" data-tab="accesos" onclick="showTab(this,'accesos')">Accesos</button>
+    <button class="item" data-tab="acciones" onclick="showTab(this,'acciones')">Acciones</button>
+    <button class="item" data-tab="modelos" onclick="showTab(this,'modelos')">Modelos</button>
+    <button class="item" data-tab="estadisticas" onclick="showTab(this,'estadisticas')">Estadisticas</button>
+  </nav>
+</aside>
+
+<main>
+  <div class="topbar">
+    <div class="topbar-title">
+      <button id="adminNavToggle" class="nav-toggle" type="button" aria-expanded="true" aria-controls="adminSidebar" onclick="toggleAdminNav()" title="Abrir/cerrar secciones">
+        <span class="hamburger-bars" aria-hidden="true"></span>
+        <span class="sr-only">Abrir/cerrar secciones</span>
+      </button>
+      <h1 id="titulo">Usuarios Registrados</h1>
+    </div>
+    <button class="logout-top" onclick="logout()">Cerrar sesion</button>
+  </div>
+
+  <div class="admin-toolbar">
+    <div id="tabActions" class="tab-actions"></div>
+    <div class="admin-filters">
+      <label for="operatorFilter">Operador</label>
+      <select id="operatorFilter" onchange="setOperatorFilter(this.value)">
+        <option value="">Todos los operadores</option>
+      </select>
+      <label id="statsDateFilterLabel" class="stats-date-filter" for="statsDateFilter">Periodo</label>
+      <select id="statsDateFilter" class="stats-date-filter" onchange="setStatsDateFilter(this.value)">
+        <option value="">Todo el historial</option>
+        <option value="15">Ultimos 15 dias</option>
+        <option value="7">Ultimos 7 dias</option>
+      </select>
+    </div>
+  </div>
+
+  <section id="usuarios" class="tab">
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th><th>Apellido</th><th>Email</th><th>Rol</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="tblUsuarios"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="camaras" class="tab tab-hidden">
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr><th>Serial</th><th>Ubicacion</th><th>Fuente</th><th>Modelo</th><th>Threshold</th><th>FPS</th><th>imgsz</th></tr>
+        </thead>
+        <tbody id="tblCamaras"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="alertas" class="tab tab-hidden">
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Camara</th><th>Estado de validacion</th><th>Revisado por</th><th>Fecha/Hora alerta</th><th>Fecha revision</th>
+          </tr>
+        </thead>
+        <tbody id="tblAlertas"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="accesos" class="tab tab-hidden">
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Usuario</th>
+            <th>Rol</th>
+            <th>Fecha / Hora</th>
+          </tr>
+        </thead>
+        <tbody id="tblAccesos"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="acciones" class="tab tab-hidden">
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr><th>Usuario</th><th>Camara</th><th>Accion</th><th>Fecha / Hora</th></tr>
+        </thead>
+        <tbody id="tblAcciones"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="modelos" class="tab tab-hidden">
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr><th>Camara</th><th>Usuario</th><th>Perfil anterior</th><th>Perfil nuevo</th><th>Threshold anterior</th><th>Threshold nuevo</th><th>Fecha / Hora</th></tr>
+        </thead>
+        <tbody id="tblModelos"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="estadisticas" class="tab tab-hidden">
+    <div class="statsGrid">
+      <div class="statCard">
+        <span>Alertas generadas</span>
+        <b id="statGenerated">0</b>
+      </div>
+      <div class="statCard">
+        <span>Alertas aceptadas</span>
+        <b id="statAccepted">0</b>
+      </div>
+      <div class="statCard">
+        <span>Camaras revisadas</span>
+        <b id="statReviewedCameras">0</b>
+      </div>
+      <div class="statCard">
+        <span>Zonas con alertas</span>
+        <b id="statZones">0</b>
+      </div>
+      <div class="statCard">
+        <span>Total alertas</span>
+        <b id="statTotalAlerts">0</b>
+      </div>
+    </div>
+
+    <div class="chartsGrid">
+      <section class="chartCard">
+        <div class="chartHead">
+          <h2>Alertas por ubicacion</h2>
+          <span class="chartHint">Distribucion por zona</span>
+        </div>
+        <div class="donutWrap">
+          <div id="donutAlertsByZone" class="donutChart" aria-label="Grafico circular de alertas por ubicacion"></div>
+          <div id="donutAlertsLegend" class="chartLegend"></div>
+        </div>
+      </section>
+
+      <section class="chartCard">
+        <h2>Alertas aceptadas por operador</h2>
+        <div id="barAcceptedByOperator" class="barChart"></div>
+      </section>
+
+      <section class="chartCard">
+        <h2>Camaras revisadas por operador</h2>
+        <div id="barReviewedByOperator" class="barChart"></div>
+      </section>
+    </div>
+  </section>
+
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const apiUrl = path => (window.sicherApiUrl ? window.sicherApiUrl(path) : path);
+const emailKey = 'sicher.email';
+let selectedOperatorId = '';
+let selectedStatsDays = '';
+let cachedUsers = [];
+const CHART_COLORS = ['#38BDF8', '#22C55E', '#F59E0B', '#EF4444', '#A78BFA', '#14B8A6', '#F97316'];
+
+function authHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  const email = localStorage.getItem(emailKey);
+  const userId = localStorage.getItem('sicher.user_id');
+  if (email) headers['X-User-Email'] = email;
+  if (userId) headers['X-User-Id'] = userId;
+  return headers;
+}
+
+function setCompanyHeader(companyName = '') {
+  const stored = localStorage.getItem('sicher.company_name') || '';
+  const name = companyName || stored || 'Empresa no indicada';
+  if (companyName) localStorage.setItem('sicher.company_name', companyName);
+  $('#usuarioHeader').textContent = name;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function operatorLabel(user) {
+  return `${user.nombre || ''} ${user.apellido || ''}`.trim() || user.email || `Operador ${user.id}`;
+}
+
+function renderOperatorFilter(users) {
+  const select = $('#operatorFilter');
+  if (!select) return;
+  const previous = selectedOperatorId || select.value || '';
+  const operators = users
+    .filter(user => (user.role || user.charge) === 'operador')
+    .sort((a, b) => operatorLabel(a).localeCompare(operatorLabel(b)));
+
+  select.innerHTML = [
+    '<option value="">Todos los operadores</option>',
+    ...operators.map(user => {
+      const state = user.is_active ? '' : ' (bloqueado)';
+      return `<option value="${user.id}">${operatorLabel(user)}${state} - ${user.email}</option>`;
+    })
+  ].join('');
+
+  const stillExists = previous === '' || operators.some(user => String(user.id) === String(previous));
+  selectedOperatorId = stillExists ? previous : '';
+  select.value = selectedOperatorId;
+}
+
+function setOperatorFilter(value) {
+  selectedOperatorId = String(value || '');
+  renderUsuarios(cachedUsers);
+  loadCamaras();
+  loadAccesos();
+  loadAcciones();
+  loadAlertas();
+  loadModelos();
+  loadEstadisticas();
+}
+
+function setStatsDateFilter(value) {
+  selectedStatsDays = String(value || '');
+  loadEstadisticas();
+}
+
+function matchesSelectedOperator(row) {
+  if (!selectedOperatorId) return true;
+  return String(row.user_id ?? row.id ?? row.created_by_user_id ?? row.reviewed_by_user_id ?? '') === String(selectedOperatorId);
+}
+
+/* ============================================================
+   Seguridad: solo un JEFE puede ver esta pagina
+============================================================ */
+(function checkAuth(){
+  const token = localStorage.getItem('sicher.token');
+  const role = localStorage.getItem('sicher.role') || localStorage.getItem('sicher.charge');
+
+  if (!token) return window.location.href = '/';
+  if (role !== 'jefe') return window.location.href = '/dashboard';
+
+  setCompanyHeader();
+})();
+
+/* ============================================================
+   Navegacion entre pestañas
+============================================================ */
+const mobileNavQuery = window.matchMedia('(max-width: 860px)');
+
+function setAdminNavOpen(open) {
+  document.body.classList.toggle('nav-collapsed', !open);
+  const toggle = $('#adminNavToggle');
+  if (toggle) toggle.setAttribute('aria-expanded', String(open));
+}
+
+function toggleAdminNav() {
+  setAdminNavOpen(document.body.classList.contains('nav-collapsed'));
+}
+
+function syncAdminNavForViewport() {
+  setAdminNavOpen(!mobileNavQuery.matches);
+}
+
+if (mobileNavQuery.addEventListener) {
+  mobileNavQuery.addEventListener('change', syncAdminNavForViewport);
+} else if (mobileNavQuery.addListener) {
+  mobileNavQuery.addListener(syncAdminNavForViewport);
+}
+
+document.addEventListener('click', (event) => {
+  if (!mobileNavQuery.matches || document.body.classList.contains('nav-collapsed')) return;
+  const sidebar = $('#adminSidebar');
+  const toggle = $('#adminNavToggle');
+  if (sidebar?.contains(event.target) || toggle?.contains(event.target)) return;
+  setAdminNavOpen(false);
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && mobileNavQuery.matches) setAdminNavOpen(false);
+});
+
+function showTab(btn, tab){
+  document.querySelectorAll('.tab').forEach(t => t.classList.add('tab-hidden'));
+  document.getElementById(tab).classList.remove('tab-hidden');
+
+  document.querySelectorAll('.item[data-tab]').forEach(i => i.classList.remove('active'));
+  btn.classList.add('active');
+
+  const titles = {
+    usuarios: 'Usuarios Registrados',
+    camaras: 'Camaras Registradas',
+    alertas: 'Historial de Alertas',
+    accesos: 'Historial de Accesos',
+    acciones: 'Acciones Realizadas',
+    modelos: 'Cambios de Configuracion de Modelos',
+    estadisticas: 'Estadisticas Operativas'
+  };
+  $('#titulo').innerText = titles[tab] || 'Panel';
+  renderTabActions(tab);
+  updateToolbarVisibility(tab);
+  if (mobileNavQuery.matches) setAdminNavOpen(false);
+}
+
+function updateToolbarVisibility(tab) {
+  const toolbar = document.querySelector('.admin-toolbar');
+  const showOperatorFilter = tab !== 'usuarios';
+  const showStatsFilter = tab !== 'usuarios';
+  if (toolbar) toolbar.classList.toggle('hidden-control', !showOperatorFilter && !showStatsFilter);
+  document.querySelectorAll('#operatorFilter, label[for="operatorFilter"]').forEach(el => {
+    el.classList.toggle('hidden-control', !showOperatorFilter);
+  });
+  document.querySelectorAll('.stats-date-filter').forEach(el => {
+    el.classList.toggle('hidden-control', !showStatsFilter);
+  });
+}
+
+function renderTabActions(tab) {
+  const actions = $('#tabActions');
+  if (!actions) return;
+  const buttons = {
+    alertas: '<button onclick="clearAlertas()" class="sec">Borrar historial de alertas</button>',
+    accesos: '<button onclick="clearAccesos()" class="sec">Borrar historial de accesos</button>',
+    acciones: '<button onclick="clearAcciones()" class="sec">Borrar historial de acciones</button>',
+    modelos: '<button onclick="clearModelos()" class="sec">Borrar historial de modelos</button>'
+  };
+  actions.innerHTML = buttons[tab] || '';
+}
+
+function statusLabel(status){
+  if (status === 'true_positive') return 'Confirmado';
+  if (status === 'false_positive') return 'Falsa Alarma';
+  return 'Pendiente';
+}
+
+function statusClass(status){
+  if (status === 'true_positive') return 'status st-true';
+  if (status === 'false_positive') return 'status st-false';
+  return 'status st-pending';
+}
+
+/* ============================================================
+   Cargar datos desde el backend
+============================================================ */
+async function loadUsuarios(){
+  const res = await fetch(apiUrl('/admin/users'), { headers: authHeaders() });
+  const data = await res.json();
+  cachedUsers = data;
+  if (!localStorage.getItem('sicher.company_name')) {
+    const company = data.find(u => u.company_name && u.company_name !== '-')?.company_name;
+    if (company) setCompanyHeader(company);
+  }
+  renderOperatorFilter(data);
+  renderUsuarios(data);
+}
+
+function renderUsuarios(data){
+  const rows = selectedOperatorId ? data.filter(matchesSelectedOperator) : data;
+  $('#tblUsuarios').innerHTML = rows.map(u => `
+    <tr>
+      <td>${u.nombre}</td>
+      <td>${u.apellido}</td>
+      <td>${u.email}</td>
+      <td>${u.role || u.charge || '-'}</td>
+      <td>${userAccessActionHtml(u)}</td>
+    </tr>
+  `).join('');
+}
+
+function userAccessActionHtml(user) {
+  if ((user.role || user.charge) !== 'operador') return '<span class="muted-cell">-</span>';
+  const active = user.is_active !== false;
+  const label = active ? 'Bloquear' : 'Activar';
+  const cls = active ? 'danger-mini' : 'success-mini';
+  return `<button class="mini-action ${cls}" onclick="toggleUserAccess(${user.id}, ${active ? 'false' : 'true'})">${label}</button>`;
+}
+
+async function toggleUserAccess(userId, isActive) {
+  const action = isActive ? 'activar' : 'bloquear';
+  if (!confirm(`¿Deseas ${action} el acceso de este operador?`)) return;
+  const res = await fetch(apiUrl(`/admin/users/${encodeURIComponent(userId)}/active`), {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ is_active: isActive })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data?.detail?.error || data?.error || `No se pudo ${action} el operador`);
+    return;
+  }
+  await loadUsuarios();
+}
+
+async function loadAlertas(){
+  const res = await fetch(apiUrl('/admin/logs/alerts'), { headers: authHeaders() });
+  const data = (await res.json()).filter(matchesSelectedOperator);
+  $('#tblAlertas').innerHTML = data.map(a => {
+    const cam = a.serial_number || `#${a.camera_id}`;
+    const reviewer = (a.reviewed_by_name && a.reviewed_by_name !== '-')
+      ? a.reviewed_by_name
+      : (a.reviewed_by_email || '-');
+
+    return `
+      <tr>
+        <td>${cam}</td>
+        <!-- <td>${Number(a.prob || 0).toFixed(3)}</td> -->
+        <td><span class="${statusClass(a.status)}">${statusLabel(a.status)}</span></td>
+        <td>${reviewer}</td>
+        <td>${new Date(a.timestamp * 1000).toLocaleString()}</td>
+        <td>${a.review_timestamp ? new Date(a.review_timestamp * 1000).toLocaleString() : '-'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function clearAlertas(){
+  if (!confirm('¿Eliminar todas las alertas?')) return;
+  await fetch(apiUrl('/admin/logs/alerts/clear'), { method: 'DELETE', headers: authHeaders() });
+  loadAlertas();
+}
+
+async function loadCamaras(){
+  const res = await fetch(apiUrl('/cameras'), { headers: authHeaders() });
+  const data = (await res.json()).filter(matchesSelectedOperator);
+  $('#tblCamaras').innerHTML = data.map(c => {
+    const cfg = c.inference_config || {};
+    return `
+      <tr>
+        <td>${c.serial_number || c.cam_id}</td>
+        <td>${c.location_description || '-'}</td>
+        <td>${c.src}</td>
+        <td>${cfg.model_profile || '-'}</td>
+        <td>${cfg.threshold !== undefined ? Number(cfg.threshold).toFixed(2) : '-'}</td>
+        <td>${cfg.fps || '-'}</td>
+        <td>${cfg.imgsz || '-'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadAccesos(){
+  const res = await fetch(apiUrl('/admin/logs/access'), { headers: authHeaders() });
+  const data = (await res.json()).filter(matchesSelectedOperator);
+  $('#tblAccesos').innerHTML = data.map(a => `
+    <tr>
+      <td>${a.usuario}</td>
+      <td>${a.cargo}</td>
+      <td>${new Date(a.timestamp * 1000).toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadAcciones(){
+  const res = await fetch(apiUrl('/admin/logs/cameras'), { headers: authHeaders() });
+  const data = (await res.json()).filter(matchesSelectedOperator);
+  $('#tblAcciones').innerHTML = data.map(a => `
+    <tr>
+      <td>${a.usuario}</td>
+      <td>${a.serial_number || `#${a.camera_id}`}</td>
+      <td>${a.action}</td>
+      <td>${new Date(a.timestamp * 1000).toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadModelos(){
+  const res = await fetch(apiUrl('/admin/logs/inference-config'), { headers: authHeaders() });
+  const data = (await res.json()).filter(matchesSelectedOperator);
+  $('#tblModelos').innerHTML = data.map(a => {
+    const oldCfg = a.old_config || {};
+    const newCfg = a.new_config || {};
+    return `
+      <tr>
+        <td>${a.serial_number || '-'}</td>
+        <td>${a.usuario || '-'}</td>
+        <td>${oldCfg.model_profile || '-'}</td>
+        <td>${newCfg.model_profile || '-'}</td>
+        <td>${oldCfg.threshold !== undefined ? Number(oldCfg.threshold).toFixed(2) : '-'}</td>
+        <td>${newCfg.threshold !== undefined ? Number(newCfg.threshold).toFixed(2) : '-'}</td>
+        <td>${new Date(a.timestamp * 1000).toLocaleString()}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function emptyRow(message, colspan) {
+  return `<tr><td colspan="${colspan}" class="muted-cell">${message}</td></tr>`;
+}
+
+function shortLabel(value, maxLength = 22) {
+  const text = String(value || '-').trim() || '-';
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
+}
+
+function compactOperatorLabel(value) {
+  const parts = String(value || '-').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '-';
+  const first = parts[0];
+  const lastInitial = parts.length > 1 ? `${parts[1][0]}.` : '';
+  return lastInitial ? `${first} ${lastInitial}` : first;
+}
+
+function renderBarChart(containerId, rows, labelKey, valueKey) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const cleanRows = rows
+    .map((row, idx) => ({
+      label: compactOperatorLabel(row[labelKey] || '-'),
+      fullLabel: row[labelKey] || '-',
+      value: Number(row[valueKey] || 0),
+      color: CHART_COLORS[idx % CHART_COLORS.length],
+    }))
+    .filter(row => row.value > 0)
+    .slice(0, 12);
+  const max = Math.max(0, ...cleanRows.map(row => row.value));
+  if (!cleanRows.length) {
+    el.innerHTML = '<div class="chartEmpty">Sin datos para graficar</div>';
+    return;
+  }
+
+  const width = Math.max(520, 120 + cleanRows.length * 96);
+  const height = 360;
+  const left = 54;
+  const right = 28;
+  const top = 44;
+  const bottom = 88;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const slot = plotWidth / cleanRows.length;
+  const barWidth = Math.min(72, Math.max(44, slot * 0.72));
+  const scaleMax = Math.max(1, max);
+  const guideValues = Array.from(new Set([0, Math.ceil(scaleMax / 2), scaleMax]));
+
+  const rowsSvg = cleanRows.map((row, idx) => {
+    const x = left + idx * slot + (slot - barWidth) / 2;
+    const barHeight = max === 0 ? 0 : (row.value / scaleMax) * plotHeight;
+    const y = top + plotHeight - barHeight;
+    const labelX = x + barWidth / 2;
+    const visibleBarHeight = Math.max(row.value > 0 ? 4 : 0, barHeight);
+    return `
+      <g>
+        <title>${escapeHtml(row.fullLabel)}: ${row.value}</title>
+        <rect x="${x}" y="${top}" width="${barWidth}" height="${plotHeight}" rx="10" class="barSvgTrack"></rect>
+        <rect x="${x}" y="${top + plotHeight - visibleBarHeight}" width="${barWidth}" height="${visibleBarHeight}" rx="10" fill="${row.value > 0 ? row.color : '#334155'}"></rect>
+        <text x="${labelX}" y="${Math.max(26, y - 10)}" class="barSvgValue">${row.value}</text>
+        <text x="${labelX}" y="${height - 50}" class="barSvgLabel" transform="rotate(-28 ${labelX} ${height - 50})">${escapeHtml(shortLabel(row.label, 14))}</text>
+      </g>
+    `;
+  }).join('');
+  const guidesSvg = guideValues.map(value => {
+    const y = top + plotHeight - (value / scaleMax) * plotHeight;
+    return `
+      <g>
+        <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="barSvgGuide"></line>
+        <text x="${left - 10}" y="${y + 5}" class="barSvgAxis">${value}</text>
+      </g>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <svg class="barSvg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Grafico de barras">
+      ${guidesSvg}
+      ${rowsSvg}
+    </svg>
+  `;
+}
+
+function renderDonutChart(chartId, legendId, rows) {
+  const chart = document.getElementById(chartId);
+  const legend = document.getElementById(legendId);
+  if (!chart || !legend) return;
+
+  const cleanRows = rows
+    .map((row, idx) => ({
+      location: row.location || '-',
+      value: Number(row.alert_count || 0),
+      color: CHART_COLORS[idx % CHART_COLORS.length],
+    }))
+    .filter(row => row.value > 0)
+    .slice(0, 7);
+  const total = cleanRows.reduce((sum, row) => sum + row.value, 0);
+  if (!cleanRows.length || total === 0) {
+    chart.innerHTML = `
+      <svg class="donutSvg" viewBox="0 0 180 180" role="img" aria-label="Grafico circular sin datos">
+        <circle cx="90" cy="90" r="62" class="donutBase"></circle>
+        <text x="90" y="98" class="donutTotal">0</text>
+      </svg>
+    `;
+    legend.innerHTML = '<div class="chartEmpty">Sin datos para graficar</div>';
+    return;
+  }
+
+  const radius = 62;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const segments = cleanRows.map(row => {
+    const length = (row.value / total) * circumference;
+    const segment = `
+      <circle
+        cx="90"
+        cy="90"
+        r="${radius}"
+        fill="none"
+        stroke="${row.color}"
+        stroke-width="24"
+        stroke-dasharray="${length} ${circumference - length}"
+        stroke-dashoffset="${-offset}"
+        stroke-linecap="round"
+        transform="rotate(-90 90 90)"
+      >
+        <title>${escapeHtml(row.location)}: ${row.value}</title>
+      </circle>
+    `;
+    offset += length;
+    return segment;
+  }).join('');
+
+  chart.innerHTML = `
+    <svg class="donutSvg" viewBox="0 0 180 180" role="img" aria-label="Grafico circular de alertas por ubicacion">
+      <circle cx="90" cy="90" r="${radius}" class="donutBase"></circle>
+      ${segments}
+      <circle cx="90" cy="90" r="39" class="donutHole"></circle>
+      <text x="90" y="91" class="donutTotal">${total}</text>
+      <text x="90" y="110" class="donutCaption">alertas</text>
+    </svg>
+  `;
+  legend.innerHTML = cleanRows.map(row => {
+    const value = row.value;
+    const pct = total ? ((value / total) * 100).toFixed(1) : '0.0';
+    return `
+      <div class="legendRow">
+        <i style="background:${row.color}"></i>
+        <span title="${escapeHtml(row.location || '-')}">${escapeHtml(row.location || '-')}</span>
+        <b>${value} (${pct}%)</b>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadEstadisticas(){
+  const params = new URLSearchParams();
+  if (selectedOperatorId) params.set('operator_id', selectedOperatorId);
+  if (selectedStatsDays) params.set('days', selectedStatsDays);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const res = await fetch(apiUrl(`/admin/stats${qs}`), { headers: authHeaders() });
+  if (!res.ok) return;
+  const data = await res.json();
+  const summary = data.summary || {};
+
+  $('#statGenerated').textContent = summary.generated_alerts || 0;
+  $('#statAccepted').textContent = summary.accepted_alerts || 0;
+  $('#statReviewedCameras').textContent = summary.reviewed_cameras || 0;
+  $('#statZones').textContent = summary.zones_with_alerts || 0;
+  $('#statTotalAlerts').textContent = summary.total_alerts || 0;
+
+  const accepted = data.accepted_alerts_by_operator || [];
+  renderBarChart('barAcceptedByOperator', accepted, 'operator', 'accepted_alerts');
+
+  const reviewed = data.reviewed_cameras_by_operator || [];
+  renderBarChart('barReviewedByOperator', reviewed, 'operator', 'reviewed_cameras');
+
+  const zones = data.alerts_by_zone || [];
+  renderDonutChart('donutAlertsByZone', 'donutAlertsLegend', zones);
+}
+
+/* ============================================================
+   Auto recarga (cada 5 s)
+============================================================ */
+function autoRefresh(){
+  loadUsuarios();
+  loadCamaras();
+  loadAccesos();
+  loadAcciones();
+  loadModelos();
+  loadAlertas();
+  loadEstadisticas();
+}
+
+autoRefresh();
+renderTabActions('usuarios');
+updateToolbarVisibility('usuarios');
+syncAdminNavForViewport();
+setInterval(autoRefresh, 5000);
+
+/* ============================================================
+   Logout
+============================================================ */
+function logout(){
+  localStorage.clear();
+  window.location.href = '/';
+}
+
+async function clearAccesos(){
+  if (!confirm('¿Seguro que quieres borrar TODO el historial de accesos?')) return;
+  await fetch(apiUrl('/admin/logs/access/clear'), { method: 'DELETE', headers: authHeaders() });
+  loadAccesos();
+}
+
+async function clearAcciones(){
+  if (!confirm('¿Seguro que quieres borrar TODO el historial de acciones?')) return;
+  await fetch(apiUrl('/admin/logs/actions/clear'), { method: 'DELETE', headers: authHeaders() });
+  loadAcciones();
+}
+
+async function clearModelos(){
+  if (!confirm('¿Seguro que quieres borrar TODO el historial de cambios de modelos?')) return;
+  await fetch(apiUrl('/admin/logs/inference-config/clear'), { method: 'DELETE', headers: authHeaders() });
+  loadModelos();
+}
+</script>
+</body>
+</html>

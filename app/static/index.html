@@ -1,0 +1,1121 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sicher - Monitoreo AI</title>
+  <link rel="stylesheet" href="/static/index.css?v=camera-layout-20260517" />
+  <script src="/config.js"></script>
+</head>
+<body>
+<header>
+  <h1>Sistema de Videovigilancia</h1>
+  <div class="sp"></div>
+  <div id="who" class="muted">-</div>
+  <button id="btnLogout" class="sec w-auto">Cerrar sesion</button>
+</header>
+
+<main>
+  <section class="panel" id="left">
+    <div class="flex-between">
+      <h2 class="mt-0">Registrar camara</h2>
+      <button id="btnToggleReg" class="collapse-toggle" title="Ocultar/Mostrar registro">&#9650;</button>
+    </div>
+
+    <div id="regSection" class="collapsible">
+      <div class="row">
+        <div>
+          <label>Serial</label>
+          <input id="cam_serial" placeholder="SN-LOBBY-001" />
+        </div>
+        <div>
+          <label>Fuente</label>
+          <input id="cam_src" placeholder="rtsp://usuario:contraseña@IP:554/ruta_del_stream" />
+        </div>
+      </div>
+
+      <div>
+        <label>Ubicacion</label>
+        <input id="cam_location" placeholder="Lobby principal - puerta norte" />
+      </div>
+
+      <div class="row mt-10">
+        <button id="btnAdd">Agregar/Actualizar</button>
+      </div>
+    </div>
+
+    <h3 class="section-title">Camaras registradas</h3>
+    <div id="camList" class="alerts"></div>
+
+    <hr class="section-divider" />
+
+    <div class="options-card">
+      <h3>Opciones del Sistema</h3>
+
+      <div class="system-model-config">
+        <label for="operatorModelProfile">Modelo para las camaras</label>
+        <select id="operatorModelProfile"></select>
+        <div id="operatorModelMeta" class="config-meta">Cargando perfiles...</div>
+        <button id="btnSaveOperatorModel" class="cam-btn cam-btn-save mt-10">Guardar modelo del operador</button>
+        <span id="operatorModelSave" class="config-save-state"></span>
+      </div>
+
+      <label class="switchWrap">
+        <input type="checkbox" id="chkOverlay">
+        <span class="switch"></span>
+        <span class="switchText">Mostrar esqueleto</span>
+      </label>
+    </div>
+
+    <h2>Alertas</h2>
+    <div id="alerts" class="alerts"></div>
+  </section>
+
+  <section class="panel" id="right">
+    <div class="flex-between gap-10">
+      <h2 class="mt-0">Monitoreo</h2>
+      <div class="toolbar-actions">
+        <button id="btnToggleSidebar" class="icon-btn" title="Ocultar panel lateral" aria-pressed="false">
+          <span class="hamburger-bars" aria-hidden="true"></span>
+          <span id="sidebarToggleText">Ocultar panel</span>
+        </button>
+        <label class="switchWrap toolbar-switch" title="Silenciar sonido de alertas">
+          <input type="checkbox" id="chkMuteAlert">
+          <span class="switch"></span>
+          <span class="switchText">Silenciar sonido</span>
+        </label>
+      </div>
+    </div>
+
+    <div id="camGrid" class="grid mt-10"></div>
+  </section>
+</main>
+
+<footer>
+  <p>Proyecto de tesis enfocado en la deteccion de acciones anomalas en video</p>
+  <p>Propiedad de: Pedro Retuerto Diaz</p>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const tokenKey = 'sicher.token';
+const emailKey = 'sicher.email';
+const alertMuteKey = 'sicher.alert_muted';
+const sidebarHiddenKey = 'sicher.sidebar_hidden';
+const wsMap = new Map();
+const wsReconnectTimers = new Map();
+const wsReconnectAttempts = new Map();
+const wsExpectedClose = new Set();
+const wsLastStatus = new Map();
+const wsLastStatusAt = new Map();
+const cameraMeta = new Map();
+const modelProfiles = new Map();
+const cameraConfigs = new Map();
+const alertingCameras = new Set();
+let operatorModelConfig = null;
+let activeBigCam = null;
+let sessionCheckTimer = null;
+
+const apiUrl = path => (window.sicherApiUrl ? window.sicherApiUrl(path) : path);
+const inferenceUrl = path => (window.sicherInferenceUrl ? window.sicherInferenceUrl(path) : path);
+const wsUrl = path => (window.sicherWsUrl ? window.sicherWsUrl(path) : path);
+
+const toDomKey = value => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+const domId = (prefix, serialNumber) => `${prefix}-${toDomKey(serialNumber)}`;
+const CONN_STATUS_LABEL = {
+  online: 'Online',
+  offline: 'Offline',
+  error: 'Error'
+};
+
+function authHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  const email = localStorage.getItem(emailKey);
+  const userId = localStorage.getItem('sicher.user_id');
+  if (email) headers['X-User-Email'] = email;
+  if (userId) headers['X-User-Id'] = userId;
+  return headers;
+}
+
+function apiErrorMessage(data, fallback) {
+  return data?.error || data?.detail?.error || data?.detail || fallback;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function setConnectionState(serialNumber, status, detail = '') {
+  const dot = document.getElementById(domId('dot', serialNumber));
+  const rowStatus = document.getElementById(domId('conn', serialNumber));
+  const cardStatus = document.getElementById(domId('connCard', serialNumber));
+  const label = CONN_STATUS_LABEL[status] || status;
+
+  if (dot) {
+    dot.classList.remove('st-online', 'st-offline', 'st-error');
+    dot.classList.add(`st-${status}`);
+  }
+  if (rowStatus) {
+    rowStatus.textContent = label;
+    rowStatus.classList.remove('st-online', 'st-offline', 'st-error');
+    rowStatus.classList.add(`st-${status}`);
+    rowStatus.title = detail || '';
+  }
+  if (cardStatus) {
+    cardStatus.textContent = label;
+    cardStatus.classList.remove('st-online', 'st-offline', 'st-error');
+    cardStatus.classList.add(`st-${status}`);
+    cardStatus.title = detail || '';
+  }
+}
+
+async function reportCameraStatus(serialNumber, status, detail = '', force = false) {
+  const now = Date.now();
+  const lastStatus = wsLastStatus.get(serialNumber);
+  const lastAt = wsLastStatusAt.get(serialNumber) || 0;
+  if (!force && lastStatus === status && (now - lastAt) < 20000) return;
+
+  wsLastStatus.set(serialNumber, status);
+  wsLastStatusAt.set(serialNumber, now);
+
+  try {
+    await fetch(apiUrl(`/cameras/${encodeURIComponent(serialNumber)}/status`), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ status, detail: detail || null })
+    });
+  } catch (e) {
+    console.warn(`No se pudo registrar estado ${status} para ${serialNumber}:`, e);
+  }
+}
+
+function clearReconnectTimer(serialNumber) {
+  const timer = wsReconnectTimers.get(serialNumber);
+  if (timer) {
+    clearTimeout(timer);
+    wsReconnectTimers.delete(serialNumber);
+  }
+}
+
+function scheduleReconnect(serialNumber, src, locationDescription = '') {
+  if (wsExpectedClose.has(serialNumber)) return;
+  if (wsReconnectTimers.has(serialNumber)) return;
+
+  const attempts = wsReconnectAttempts.get(serialNumber) || 0;
+  const delayMs = Math.min(30000, 1000 * (2 ** attempts));
+  const detail = `reintento ${attempts + 1} en ${Math.round(delayMs / 1000)}s`;
+  setConnectionState(serialNumber, 'error', detail);
+  reportCameraStatus(serialNumber, 'error', detail).catch(() => {});
+
+  const timer = setTimeout(() => {
+    wsReconnectTimers.delete(serialNumber);
+    wsReconnectAttempts.set(serialNumber, attempts + 1);
+    openWS(serialNumber, src, locationDescription, { isReconnect: true });
+  }, delayMs);
+  wsReconnectTimers.set(serialNumber, timer);
+}
+
+function setCameraAlerting(serialNumber, isAlerting) {
+  const card = document.getElementById(domId('card', serialNumber));
+  if (!card) return;
+
+  if (isAlerting) {
+    alertingCameras.add(serialNumber);
+    card.classList.add('alerting');
+  } else {
+    alertingCameras.delete(serialNumber);
+    card.classList.remove('alerting');
+  }
+}
+
+function expandCamera(serialNumber) {
+  const grid = $('#camGrid');
+  const card = document.getElementById(domId('card', serialNumber));
+  if (!card) return;
+
+  if (activeBigCam && activeBigCam !== serialNumber) {
+    const prev = document.getElementById(domId('card', activeBigCam));
+    if (prev) prev.classList.remove('bigCam');
+  }
+
+  activeBigCam = serialNumber;
+  card.classList.add('bigCam');
+  grid.classList.add('smallLayout');
+}
+
+function restoreCamera(serialNumber = activeBigCam) {
+  if (!serialNumber) return;
+  const card = document.getElementById(domId('card', serialNumber));
+  if (!card) return;
+
+  card.classList.remove('bigCam');
+
+  if (activeBigCam === serialNumber) {
+    activeBigCam = null;
+    $('#camGrid').classList.remove('smallLayout');
+  }
+}
+
+function bindManualCameraExpand(card, serialNumber) {
+  card.addEventListener('click', () => {
+    if (activeBigCam === serialNumber) {
+      restoreCamera(serialNumber);
+      return;
+    }
+    expandCamera(serialNumber);
+  });
+}
+
+document.addEventListener('click', ev => {
+  if (!activeBigCam) return;
+  const activeCard = document.getElementById(domId('card', activeBigCam));
+  if (!activeCard) {
+    activeBigCam = null;
+    $('#camGrid')?.classList.remove('smallLayout');
+    return;
+  }
+  if (!activeCard.contains(ev.target)) restoreCamera(activeBigCam);
+});
+
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') restoreCamera(activeBigCam);
+});
+
+/* ===========================
+   OVERLAY: CARGAR ESTADO
+=========================== */
+async function loadOverlay() {
+  try {
+    const res = await fetch(inferenceUrl('/overlay/get'));
+    const data = await res.json();
+    $('#chkOverlay').checked = data.overlay === true;
+  } catch (e) {
+    console.warn('No se pudo cargar overlay:', e);
+  }
+}
+
+/* ===========================
+   OVERLAY: CAMBIAR ESTADO
+=========================== */
+async function setOverlay() {
+  const val = $('#chkOverlay').checked;
+  await fetch(inferenceUrl('/overlay/set'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ overlay: val })
+  });
+}
+
+$('#chkOverlay').addEventListener('change', setOverlay);
+
+/* ===========================
+   MODELOS POR CAMARA
+=========================== */
+async function loadModelProfiles() {
+  try {
+    const res = await fetch(apiUrl('/model-profiles'), { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(apiErrorMessage(data, 'No se pudieron cargar perfiles'));
+
+    modelProfiles.clear();
+    data.forEach(profile => modelProfiles.set(profile.id, profile));
+  } catch (e) {
+    console.warn('No se pudieron cargar perfiles de modelo:', e);
+  }
+}
+
+function profileOptionsHtml(selectedId) {
+  if (modelProfiles.size === 0) {
+    return '<option value="hnm_balanced">Recomendado</option>';
+  }
+
+  return Array.from(modelProfiles.values()).map(profile => {
+    const selected = profile.id === selectedId ? 'selected' : '';
+    const disabled = profile.available ? '' : 'disabled';
+    const suffix = profile.available ? '' : ' - no instalado';
+    return `<option value="${escapeHtml(profile.id)}" ${selected} ${disabled}>${escapeHtml(profileDisplayName(profile))}${suffix}</option>`;
+  }).join('');
+}
+
+function profileDisplayName(profileOrId) {
+  const id = typeof profileOrId === 'string' ? profileOrId : profileOrId?.id;
+  if (id === 'hnm_balanced') return 'Recomendado';
+  return (typeof profileOrId === 'object' && profileOrId?.name) ? profileOrId.name : (id || 'Modelo');
+}
+
+function renderOperatorModelConfig(rawConfig = {}) {
+  operatorModelConfig = rawConfig;
+  const select = $('#operatorModelProfile');
+  const meta = $('#operatorModelMeta');
+  if (!select) return;
+
+  const selectedId = rawConfig.model_profile || 'hnm_balanced';
+  select.innerHTML = profileOptionsHtml(selectedId);
+  select.value = selectedId;
+
+  const profile = modelProfiles.get(selectedId) || rawConfig;
+  if (meta) {
+    meta.textContent = `${profileDisplayName(profile.id ? profile : selectedId)} · ${Number(profile.fps ?? rawConfig.fps ?? 10).toFixed(0)} FPS · imgsz ${profile.imgsz ?? rawConfig.imgsz ?? 960} · ${profile.pose_model ?? rawConfig.pose_model ?? 'yolo11s-pose.pt'} · promedio ${profile.smoothing_windows ?? rawConfig.smoothing_windows ?? 3} ventanas · thresholds por camara`;
+  }
+}
+
+async function loadOperatorModelConfig() {
+  try {
+    const res = await fetch(apiUrl('/operator/inference-config'), { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(apiErrorMessage(data, 'No se pudo cargar modelo del operador'));
+    renderOperatorModelConfig(data);
+  } catch (e) {
+    console.warn('No se pudo cargar modelo del operador:', e);
+    renderOperatorModelConfig({ model_profile: 'hnm_balanced' });
+  }
+}
+
+async function saveOperatorModelConfig() {
+  const select = $('#operatorModelProfile');
+  const status = $('#operatorModelSave');
+  if (!select) return;
+
+  if (status) status.textContent = 'Guardando...';
+  try {
+    const res = await fetch(apiUrl('/operator/inference-config'), {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ model_profile: select.value })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(apiErrorMessage(data, 'No se pudo guardar modelo del operador'));
+    renderOperatorModelConfig(data);
+    await loadCameras();
+    if (status) status.textContent = `Guardado · ${data.updated_cameras || 0} camaras actualizadas`;
+    setTimeout(() => { if (status) status.textContent = ''; }, 2600);
+  } catch (e) {
+    if (status) status.textContent = 'Error';
+    alert(e.message || 'No se pudo guardar modelo del operador');
+  }
+}
+
+function configWithProfileDefaults(config = {}) {
+  const profileId = config.model_profile || 'hnm_balanced';
+  const profile = modelProfiles.get(profileId) || modelProfiles.get('hnm_balanced') || {};
+  return {
+    model_profile: profileId,
+    threshold: Number(config.threshold ?? profile.threshold ?? 0.49),
+    fps: Number(config.fps ?? profile.fps ?? 10),
+    imgsz: Number(config.imgsz ?? profile.imgsz ?? 960),
+    pose_model: config.pose_model || profile.pose_model || 'yolo11s-pose.pt',
+    feature_version: config.feature_version || profile.feature_version || 'v1',
+    smoothing_windows: Number(config.smoothing_windows ?? profile.smoothing_windows ?? 3),
+    alert_windows: Number(config.alert_windows ?? profile.alert_windows ?? 2),
+    cooldown_seconds: Number(config.cooldown_seconds ?? profile.cooldown_seconds ?? 30),
+    overlay: Boolean(config.overlay ?? false)
+  };
+}
+
+function renderCameraRuntimeMeta(serialNumber, config) {
+  const key = toDomKey(serialNumber);
+  const meta = document.getElementById(`cfgMeta-${key}`);
+  const cardCfg = document.getElementById(`cfg-${key}`);
+  const thrLive = document.getElementById(`thrLive-${key}`);
+  const profile = modelProfiles.get(config.model_profile);
+  const profileName = profileDisplayName(profile || config.model_profile);
+  const text = `${profileName} · ${Number(config.fps || 0).toFixed(0)} FPS · imgsz ${config.imgsz} · ${config.pose_model} · promedio ${config.smoothing_windows} ventanas · alerta: ${config.alert_windows} ventanas + ${Number(config.cooldown_seconds || 0).toFixed(0)}s`;
+  if (meta) meta.textContent = text;
+  if (cardCfg) {
+    const compact = `${profileName} · thr ${Number(config.threshold || 0).toFixed(2)}`;
+    cardCfg.title = compact;
+    cardCfg.innerHTML = `<span class="hamburger-bars" aria-hidden="true"></span><span>${escapeHtml(profileName)}</span>`;
+  }
+  if (thrLive) thrLive.textContent = Number(config.threshold || 0).toFixed(2);
+}
+
+function renderCameraConfig(serialNumber, rawConfig = {}) {
+  const key = toDomKey(serialNumber);
+  const config = configWithProfileDefaults(rawConfig);
+  cameraConfigs.set(serialNumber, config);
+
+  const range = document.getElementById(`cardThr-${key}`);
+  const value = document.getElementById(`cardThrVal-${key}`);
+  if (range) range.value = Number(config.threshold).toFixed(2);
+  if (value) value.textContent = Number(config.threshold).toFixed(2);
+  renderCameraRuntimeMeta(serialNumber, config);
+}
+
+async function saveCameraConfig(serialNumber) {
+  const key = toDomKey(serialNumber);
+  const range = document.getElementById(`cardThr-${key}`);
+  const status = document.getElementById(`cardCfgSave-${key}`);
+  if (!range) return;
+
+  const payload = {
+    threshold: Number(range.value),
+    overlay: $('#chkOverlay')?.checked === true
+  };
+
+  if (status) status.textContent = 'Guardando...';
+  try {
+    const res = await fetch(apiUrl(`/cameras/${encodeURIComponent(serialNumber)}/inference-config`), {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(apiErrorMessage(data, 'No se pudo guardar configuracion'));
+    renderCameraConfig(serialNumber, data);
+    if (status) status.textContent = 'Guardado';
+    setThresholdEditorOpen(serialNumber, false);
+    setTimeout(() => { if (status) status.textContent = ''; }, 1800);
+  } catch (e) {
+    if (status) status.textContent = 'Error';
+    alert(e.message || 'No se pudo guardar configuracion');
+  }
+}
+
+function setThresholdEditorOpen(serialNumber, open) {
+  const key = toDomKey(serialNumber);
+  const editor = document.getElementById(`thresholdEditor-${key}`);
+  const toggle = document.getElementById(`thresholdToggle-${key}`);
+  if (!editor || !toggle) return;
+  editor.classList.toggle('hidden', !open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function toggleThresholdEditor(serialNumber) {
+  const key = toDomKey(serialNumber);
+  const editor = document.getElementById(`thresholdEditor-${key}`);
+  if (!editor) return;
+  setThresholdEditorOpen(serialNumber, editor.classList.contains('hidden'));
+}
+
+function loadAlertSoundPreference() {
+  const muted = localStorage.getItem(alertMuteKey) === '1';
+  const chkMute = $('#chkMuteAlert');
+  if (chkMute) chkMute.checked = muted;
+}
+
+function setAlertSoundPreference() {
+  const muted = $('#chkMuteAlert')?.checked === true;
+  localStorage.setItem(alertMuteKey, muted ? '1' : '0');
+  if (muted) pendingAlertSound = false;
+}
+
+function setSidebarHidden(hidden) {
+  document.body.classList.toggle('sidebar-hidden', hidden);
+  localStorage.setItem(sidebarHiddenKey, hidden ? '1' : '0');
+
+  const btn = $('#btnToggleSidebar');
+  const label = $('#sidebarToggleText');
+  if (btn) {
+    btn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+    btn.title = hidden ? 'Mostrar panel lateral' : 'Ocultar panel lateral';
+  }
+  if (label) label.textContent = hidden ? 'Mostrar panel configurable' : 'Ocultar panel configurable';
+}
+
+function loadSidebarPreference() {
+  setSidebarHidden(localStorage.getItem(sidebarHiddenKey) === '1');
+}
+
+function toggleSidebar() {
+  setSidebarHidden(!document.body.classList.contains('sidebar-hidden'));
+}
+
+/* ===========================
+    SESION
+=========================== */
+function setWho() {
+  const nombre = localStorage.getItem('sicher.nombre');
+  const apellido = localStorage.getItem('sicher.apellido');
+  const role = localStorage.getItem('sicher.role') || localStorage.getItem('sicher.charge') || '-';
+
+  if (nombre && apellido) {
+    $('#who').innerHTML = `Bienvenido: <b>${nombre} ${apellido}</b> `;
+  } else {
+    $('#who').innerHTML = 'No autenticado';
+  }
+}
+
+function clearLocalSession() {
+  localStorage.removeItem(tokenKey);
+  localStorage.removeItem(emailKey);
+  localStorage.removeItem('sicher.nombre');
+  localStorage.removeItem('sicher.apellido');
+  localStorage.removeItem('sicher.role');
+  localStorage.removeItem('sicher.charge');
+  localStorage.removeItem('sicher.user_id');
+  localStorage.removeItem('sicher.company_name');
+}
+
+function logout() {
+  clearLocalSession();
+  window.location.href = '/';
+}
+
+function forceSessionClosed(message) {
+  Array.from(wsMap.keys()).forEach(serial => closeWS(serial, { removeCard: true, report: false }));
+  clearLocalSession();
+  alert(message || 'Su sesion fue cerrada.');
+  window.location.href = '/';
+}
+
+async function checkSessionAccess() {
+  if (!localStorage.getItem(tokenKey)) return false;
+  try {
+    const res = await fetch(apiUrl('/session/status'), { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.authenticated === false || data.is_active === false) {
+      forceSessionClosed(data.message || 'Usted no tiene permisos. Pida activacion a su jefe.');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn('No se pudo verificar la sesion:', e);
+    return true;
+  }
+}
+
+function startSessionMonitor() {
+  if (sessionCheckTimer) clearInterval(sessionCheckTimer);
+  sessionCheckTimer = setInterval(checkSessionAccess, 5000);
+}
+
+/* ===========================
+   CAMERAS CRUD
+=========================== */
+async function addCamera() {
+  const serial_number = $('#cam_serial').value.trim();
+  const src = $('#cam_src').value.trim();
+  const location_description = $('#cam_location').value.trim();
+
+  if (!serial_number || !src) return alert('Completa serial y fuente');
+
+  const res = await fetch(apiUrl('/cameras'), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ serial_number, src, location_description })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(apiErrorMessage(err, 'No se pudo registrar la camara'));
+    return;
+  }
+
+  $('#cam_serial').value = '';
+  $('#cam_src').value = '';
+  $('#cam_location').value = '';
+
+  await loadCameras();
+}
+
+async function deleteCamera(serialNumber,btnElement) {
+  closeWS(serialNumber, { removeCard: true, report: false });
+  if (btnElement) {
+    const row = btnElement.closest('.cam-row');
+    if (row) row.remove();
+  }
+  const headers = {};
+  const email = localStorage.getItem(emailKey);
+  const userId = localStorage.getItem('sicher.user_id');
+  if (email) headers['X-User-Email'] = email;
+  if (userId) headers['X-User-Id'] = userId;
+
+  try {
+    await fetch(apiUrl('/cameras/' + encodeURIComponent(serialNumber)), {
+      method: 'DELETE',
+      headers
+    });
+  
+  } catch (error) {
+    console.error("Error al borrar en el servidor", error);
+    alert("Hubo un error de conexión. Recargando cámaras...");
+    await loadCameras(); 
+  }
+
+  await loadCameras();
+}
+
+function rowCam(cfg) {
+  const serial = cfg.serial_number || cfg.cam_id;
+  const location = cfg.location_description || 'Sin ubicacion';
+  const div = document.createElement('div');
+  div.className = 'cam-row';
+  div.innerHTML = `
+    <div class="flex-row gap-8 mb-8">
+      <div class="statusdot" id="${domId('dot', serial)}"></div>
+      <div class="flex-1">
+        <b>${escapeHtml(serial)}</b>
+        <div class="cam-conn muted">${escapeHtml(location)}</div>
+      </div>
+    </div>
+    <div class="cam-actions">
+      <button data-serial="${escapeHtml(serial)}" data-src="${encodeURIComponent(cfg.src)}" data-loc="${encodeURIComponent(location)}" class="btnOpen cam-btn cam-btn-open">Abrir</button>
+      <button data-serial="${escapeHtml(serial)}" class="btnClose cam-btn cam-btn-close">Cerrar</button>
+      <button data-serial="${escapeHtml(serial)}" class="btnDel cam-btn cam-btn-del">Eliminar</button>
+    </div>
+  `;
+  return div;
+}
+
+async function loadCameras() {
+  const res = await fetch(apiUrl('/cameras'), { headers: authHeaders() });
+  const cams = await res.json();
+
+  cameraMeta.clear();
+
+  const list = $('#camList');
+  list.innerHTML = '';
+
+  cams.forEach(cfg => {
+    const serial = cfg.serial_number || cfg.cam_id;
+    if (!serial) return;
+    cameraMeta.set(serial, cfg);
+    list.appendChild(rowCam(cfg));
+    renderCameraConfig(serial, cfg.inference_config);
+    if (wsMap.has(serial)) {
+      setConnectionState(serial, 'online');
+    } else if (wsLastStatus.has(serial)) {
+      setConnectionState(serial, wsLastStatus.get(serial) || 'offline');
+    } else {
+      setConnectionState(serial, 'offline');
+    }
+  });
+
+  list.querySelectorAll('.btnOpen').forEach(b => {
+    b.onclick = () => openWS(
+      b.dataset.serial,
+      decodeURIComponent(b.dataset.src || ''),
+      decodeURIComponent(b.dataset.loc || '')
+    );
+  });
+  list.querySelectorAll('.btnClose').forEach(b => {
+    b.onclick = () => closeWS(b.dataset.serial);
+  });
+  list.querySelectorAll('.btnDel').forEach(b => {
+    b.onclick = (e) => deleteCamera(b.dataset.serial, e.target);
+  });
+}
+
+/* ===========================
+    WEBSOCKET STREAM
+=========================== */
+function camCard(serialNumber, locationDescription = '') {
+  const key = toDomKey(serialNumber);
+  const meta = cameraMeta.get(serialNumber);
+  const src = meta ? meta.src : '';
+  const config = configWithProfileDefaults(cameraConfigs.get(serialNumber) || meta?.inference_config || {});
+  const profile = modelProfiles.get(config.model_profile);
+  const cfgText = `${profileDisplayName(profile || config.model_profile)} · thr ${Number(config.threshold).toFixed(2)}`;
+  const card = document.createElement('div');
+  card.className = alertingCameras.has(serialNumber) ? 'camcard alerting' : 'camcard';
+  card.id = `card-${key}`;
+  card.innerHTML = `
+    <div class="camera-topbar">
+      <button id="thresholdToggle-${key}" class="threshold-chip" type="button" aria-expanded="false" title="Editar threshold de esta camara">
+        Threshold <b id="thrLive-${key}">${Number(config.threshold).toFixed(2)}</b>
+      </button>
+    </div>
+    <div id="thresholdEditor-${key}" class="threshold-editor hidden">
+      <span>Threshold</span>
+      <input id="cardThr-${key}" class="cardCameraThreshold" data-serial="${escapeHtml(serialNumber)}" type="range" min="0.10" max="0.95" step="0.01" value="${Number(config.threshold).toFixed(2)}">
+      <b id="cardThrVal-${key}" class="threshold-value">${Number(config.threshold).toFixed(2)}</b>
+      <button data-serial="${escapeHtml(serialNumber)}" class="btnSaveCfgCard cam-btn cam-btn-save">Guardar</button>
+      <span id="cardCfgSave-${key}" class="config-save-state"></span>
+    </div>
+    <div class="camhead">
+      <div>
+        <h3>${escapeHtml(serialNumber)}</h3>
+        <div class="cammeta">${escapeHtml(locationDescription || 'Sin ubicacion')}</div>
+      </div>
+    </div>
+    <div class="frame">
+      <img id="img-${key}" />
+    </div>
+    <div class="stats">
+      <div>Amenaza: <b id="state-${key}" class="ok">OK</b></div>
+      <div>Conexion: <b id="${domId('connCard', serialNumber)}" class="st-offline">Offline</b></div>
+      <div>Prob alerta: <b id="prob-${key}" class="muted">0.000</b></div>
+    </div>
+    <div class="cam-src-label">${escapeHtml(src)}</div>
+  `;
+  const thresholdToggle = card.querySelector(`#thresholdToggle-${key}`);
+  const thresholdEditor = card.querySelector(`#thresholdEditor-${key}`);
+  const thresholdRange = card.querySelector(`#cardThr-${key}`);
+  const thresholdSave = card.querySelector('.btnSaveCfgCard');
+  thresholdToggle?.addEventListener('click', ev => {
+    ev.stopPropagation();
+    toggleThresholdEditor(serialNumber);
+  });
+  thresholdEditor?.addEventListener('click', ev => ev.stopPropagation());
+  thresholdRange?.addEventListener('input', () => {
+    const value = document.getElementById(`cardThrVal-${key}`);
+    if (value) value.textContent = Number(thresholdRange.value).toFixed(2);
+  });
+  thresholdSave?.addEventListener('click', ev => {
+    ev.stopPropagation();
+    saveCameraConfig(serialNumber);
+  });
+  bindManualCameraExpand(card, serialNumber);
+  return card;
+}
+
+function openWS(serialNumber, src, locationDescription = '', opts = {}) {
+  const { isReconnect = false } = opts;
+  if (!serialNumber) return;
+
+  const cardId = domId('card', serialNumber);
+  if (!document.getElementById(cardId)) {
+    $('#camGrid').appendChild(camCard(serialNumber, locationDescription));
+  }
+
+  if (wsMap.has(serialNumber)) return;
+  clearReconnectTimer(serialNumber);
+  if (!isReconnect) {
+    wsExpectedClose.delete(serialNumber);
+    wsReconnectAttempts.set(serialNumber, 0);
+  }
+  setConnectionState(serialNumber, 'offline', 'Conectando...');
+
+  const params = new URLSearchParams();
+  if (src) params.set('src', src);
+  const userId = localStorage.getItem('sicher.user_id');
+  if (userId) params.set('user_id', userId);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const url = wsUrl(`/ws/stream/${encodeURIComponent(serialNumber)}${qs}`);
+  const ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    const srv = $('#srv');
+    if (srv) srv.textContent = url;
+    wsReconnectAttempts.set(serialNumber, 0);
+    setConnectionState(serialNumber, 'online');
+    reportCameraStatus(serialNumber, 'online', isReconnect ? 'reconectado' : 'conexion abierta', isReconnect).catch(() => {});
+  };
+
+  ws.onclose = (ev) => {
+    wsMap.delete(serialNumber);
+    if (wsExpectedClose.has(serialNumber)) {
+      wsExpectedClose.delete(serialNumber);
+      clearReconnectTimer(serialNumber);
+      return;
+    }
+    setConnectionState(serialNumber, 'offline', ev?.reason || '');
+    reportCameraStatus(serialNumber, 'offline', ev?.reason || '').catch(() => {});
+    scheduleReconnect(serialNumber, src, locationDescription);
+  };
+
+  ws.onerror = () => {
+    setConnectionState(serialNumber, 'error', 'Fallo de conexion');
+    reportCameraStatus(serialNumber, 'error', 'fallo websocket').catch(() => {});
+  };
+
+  ws.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+
+      if (msg.type === 'frame') {
+        const msgSerial = msg.serial_number || msg.cam_id || serialNumber;
+        const key = toDomKey(msgSerial);
+
+        const img = document.getElementById(`img-${key}`);
+        const prob = document.getElementById(`prob-${key}`);
+        const cfgLive = document.getElementById(`cfg-${key}`);
+        const thrLive = document.getElementById(`thrLive-${key}`);
+        const st = document.getElementById(`state-${key}`);
+        const alertProb = Number(msg.smoothed_prob ?? msg.prob ?? msg.p_vid ?? msg.stacker_prob ?? msg.p_win ?? 0);
+
+        if (img) img.src = 'data:image/jpeg;base64,' + msg.jpg_b64;
+        if (prob) prob.textContent = alertProb.toFixed(3);
+        if (cfgLive || thrLive) {
+          const liveConfig = configWithProfileDefaults({
+            model_profile: msg.model_profile,
+            threshold: msg.threshold,
+            fps: msg.fps,
+            imgsz: msg.imgsz,
+            pose_model: msg.pose_model,
+            smoothing_windows: msg.smoothing_windows
+          });
+          cameraConfigs.set(msgSerial, liveConfig);
+          renderCameraRuntimeMeta(msgSerial, liveConfig);
+          if (thrLive) thrLive.textContent = Number(liveConfig.threshold || 0).toFixed(2);
+        }
+
+        if (st) {
+          if (msg.on) {
+            st.textContent = 'ALERTA';
+            st.className = 'alert';
+            setCameraAlerting(msgSerial, true);
+          } else {
+            st.textContent = 'OK';
+            st.className = 'ok';
+            setCameraAlerting(msgSerial, false);
+          }
+        }
+      } else if (msg.type === 'alert') {
+        setCameraAlerting(msg.serial_number || msg.cam_id || serialNumber, true);
+        addAlert(msg);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  wsMap.set(serialNumber, ws);
+}
+
+function closeWS(serialNumber, options = {}) {
+  const { removeCard = true, report = true } = options;
+  wsExpectedClose.add(serialNumber);
+  clearReconnectTimer(serialNumber);
+  wsReconnectAttempts.set(serialNumber, 0);
+
+  const ws = wsMap.get(serialNumber);
+  if (ws) {
+    ws.close();
+    wsMap.delete(serialNumber);
+  }
+
+  setConnectionState(serialNumber, 'offline', 'Cerrado por usuario');
+  if (report) {
+    reportCameraStatus(serialNumber, 'offline', 'cerrado por usuario').catch(() => {});
+  }
+  if (removeCard) {
+    const card = document.getElementById(domId('card', serialNumber));
+    if (card) card.remove();
+  }
+  alertingCameras.delete(serialNumber);
+  if (activeBigCam === serialNumber) {
+    activeBigCam = null;
+    $('#camGrid')?.classList.remove('smallLayout');
+  }
+}
+
+async function persistPendingAlert(msg) {
+  const serial_number = msg.serial_number || msg.cam_id;
+  const prob = Number(msg.prob || 0);
+  const ts = Number(msg.ts || (Date.now() / 1000));
+
+  if (!serial_number) return;
+
+  const payload = {
+    serial_number,
+    prob,
+    timestamp: ts,
+    status: 'pending',
+    model_profile: msg.model_profile || null,
+    threshold: msg.threshold ?? null
+  };
+
+  await fetch(apiUrl('/alerts/save'), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+async function acceptAlert(ev) {
+  const btn = ev.currentTarget;
+  const serial_number = btn.dataset.serial;
+  const prob = parseFloat(btn.dataset.prob || '0');
+  const ts = parseFloat(btn.dataset.ts || '0');
+
+  const payload = {
+    serial_number,
+    prob,
+    timestamp: ts,
+    status: 'true_positive',
+    reviewer_email: localStorage.getItem(emailKey) || null
+  };
+
+  await fetch(apiUrl('/alerts/save'), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+
+  btn.closest('.alertrow')?.remove();
+}
+
+async function rejectAlert(ev) {
+  const btn = ev.currentTarget;
+  const serial_number = btn.dataset.serial;
+  const prob = parseFloat(btn.dataset.prob || '0');
+  const ts = parseFloat(btn.dataset.ts || '0');
+
+  const payload = {
+    serial_number,
+    prob,
+    timestamp: ts,
+    status: 'false_positive',
+    reviewer_email: localStorage.getItem(emailKey) || null
+  };
+
+  await fetch(apiUrl('/alerts/save'), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+
+  btn.closest('.alertrow')?.remove();
+}
+
+/* ===========================
+   SONIDO DE ALERTA
+=========================== */
+let alertAudioCtx = null;
+let pendingAlertSound = false;
+let audioUnlockBound = false;
+
+function getAlertAudioCtx() {
+  if (alertAudioCtx) return alertAudioCtx;
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  alertAudioCtx = new AudioCtx();
+  return alertAudioCtx;
+}
+
+async function unlockAlertAudio() {
+  const ctx = getAlertAudioCtx();
+  if (!ctx) return false;
+
+  if (ctx.state === 'suspended') {
+    try {
+      await ctx.resume();
+    } catch (e) {
+      console.warn('No se pudo reanudar el audio de alertas:', e);
+    }
+  }
+
+  if (ctx.state === 'running') {
+    if (audioUnlockBound) {
+      ['pointerdown', 'keydown', 'touchstart'].forEach(eventName => {
+        document.removeEventListener(eventName, unlockAlertAudio);
+      });
+      audioUnlockBound = false;
+    }
+
+    if (pendingAlertSound) {
+      pendingAlertSound = false;
+      playAlertSound();
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function bindAlertAudioUnlock() {
+  if (audioUnlockBound) return;
+  ['pointerdown', 'keydown', 'touchstart'].forEach(eventName => {
+    document.addEventListener(eventName, unlockAlertAudio, { passive: true });
+  });
+  audioUnlockBound = true;
+}
+
+function playAlertSound() {
+  if ($('#chkMuteAlert')?.checked === true) {
+    pendingAlertSound = false;
+    return;
+  }
+
+  const ctx = getAlertAudioCtx();
+  if (!ctx) return;
+
+  if (ctx.state !== 'running') {
+    pendingAlertSound = true;
+    unlockAlertAudio();
+    return;
+  }
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.type = 'sine';
+  osc.frequency.value = 880;
+  gain.gain.setValueAtTime(0.3, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.5);
+}
+
+function addAlert(msg) {
+  const serial_number = msg.serial_number || msg.cam_id;
+  if (!serial_number) return;
+
+  playAlertSound();
+
+  const ts = Number(msg.ts || (Date.now() / 1000));
+  const prob = Number(msg.prob || 0);
+
+  persistPendingAlert({ ...msg, serial_number, prob, ts }).catch(e => {
+    console.warn('No se pudo persistir alerta pendiente:', e);
+  });
+
+  const row = document.createElement('div');
+  row.className = 'alertrow';
+
+  const tsText = new Date(ts * 1000).toLocaleString();
+
+  row.innerHTML = `
+    <div class="alert-info">
+      <b>${escapeHtml(serial_number)}</b>
+      <div class="muted">prob=${prob.toFixed(3)} · thr=${Number(msg.threshold ?? 0).toFixed(2)} · ${escapeHtml(msg.model_profile || 'modelo')} · ${tsText}</div>
+    </div>
+    <button class="sec action-btn btnOk" data-serial="${serial_number}" data-prob="${prob}" data-ts="${ts}">Aceptar</button>
+    <button class="sec action-btn btnNo" data-serial="${serial_number}" data-prob="${prob}" data-ts="${ts}">Rechazar</button>
+  `;
+
+  $('#alerts').prepend(row);
+
+  row.querySelector('.btnOk').onclick = acceptAlert;
+  row.querySelector('.btnNo').onclick = rejectAlert;
+}
+
+/* ===========================
+    INIT
+=========================== */
+$('#btnLogout').onclick = logout;
+$('#btnAdd').onclick = addCamera;
+$('#chkMuteAlert').addEventListener('change', setAlertSoundPreference);
+$('#btnToggleSidebar').addEventListener('click', toggleSidebar);
+$('#btnSaveOperatorModel').addEventListener('click', saveOperatorModelConfig);
+$('#operatorModelProfile').addEventListener('change', () => {
+  renderOperatorModelConfig({
+    ...(operatorModelConfig || {}),
+    model_profile: $('#operatorModelProfile').value
+  });
+});
+$('#btnToggleReg').onclick = () => {
+  const sec = $('#regSection');
+  const btn = $('#btnToggleReg');
+  sec.classList.toggle('hidden');
+  btn.classList.toggle('collapsed');
+};
+
+(async function init() {
+  if (!localStorage.getItem(tokenKey)) {
+    window.location.href = '/';
+    return;
+  }
+  const allowed = await checkSessionAccess();
+  if (!allowed) return;
+
+  loadAlertSoundPreference();
+  loadSidebarPreference();
+  bindAlertAudioUnlock();
+  setWho();
+  await loadOverlay();
+  await loadModelProfiles();
+  await loadOperatorModelConfig();
+  await loadCameras();
+  startSessionMonitor();
+})();
+</script>
+</body>
+</html>

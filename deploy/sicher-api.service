@@ -1,0 +1,20 @@
+[Unit]
+Description=Sicher FastAPI aggression detection backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/sicher/tesis_v22
+Environment=DATABASE_URL=sqlite:////opt/sicher/tesis_v22/users.db
+Environment=MPLCONFIGDIR=/opt/sicher/tesis_v22/.cache/matplotlib
+Environment=YOLO_CONFIG_DIR=/opt/sicher/tesis_v22/.cache/ultralytics
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/pytorch/bin/python -m uvicorn app.server:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

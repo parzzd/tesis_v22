@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Cuenta bloqueada</title>
+<link rel="stylesheet" href="/static/login_fail.css"/>
+<script src="/config.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="shell">
+    <h1>Cuenta bloqueada temporalmente</h1>
+    <p>Por seguridad, se ha superado el número máximo de intentos de inicio de sesión.</p>
+    <p>Podrás volver a intentar en:</p>
+    <div id="timer" class="timer">05:00</div>
+    <p>Por favor, espera o contacta al administrador si el problema persiste.</p>
+    <button id="btn" class="btn" disabled>Volver al inicio de sesión</button>
+  </div>
+</div>
+
+<script>
+const btn = document.getElementById('btn');
+const timerEl = document.getElementById('timer');
+
+let remaining = 5 * 60;
+
+const blockedUntil = localStorage.getItem('blocked_until');
+if (blockedUntil) {
+  const end = new Date(blockedUntil);
+  const diff = Math.floor((end - new Date()) / 1000);
+  if (diff > 0) remaining = diff;
+}
+
+function formatTime(s){
+  const m = String(Math.floor(s/60)).padStart(2,'0');
+  const sec = String(s%60).padStart(2,'0');
+  return `${m}:${sec}`;
+}
+
+function updateTimer(){
+  timerEl.textContent = formatTime(remaining);
+  if(remaining <= 0){
+    clearInterval(interval);
+    btn.disabled = false;
+    btn.textContent = "Reintentar inicio de sesión";
+  } else remaining--;
+}
+
+const interval = setInterval(updateTimer, 1000);
+updateTimer();
+
+btn.onclick = () => {
+  localStorage.removeItem('blocked_until');
+  window.location.href = '/';
+};
+</script>
+</body>
+</html>

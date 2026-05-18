@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Crear cuenta - Sistema de Deteccion</title>
+<link rel="stylesheet" href="/static/login.css?v=register-page-20260517"/>
+<script src="/config.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="shell">
+    <div class="logo">
+      <h1>Sistema de Seguridad</h1>
+    </div>
+
+    <h2>Crear cuenta</h2>
+    <div id="regErr" class="err"></div>
+
+    <label>Nombre</label>
+    <input id="reg_nombre" class="in" placeholder="Juan" autocomplete="given-name"/>
+
+    <label>Apellido</label>
+    <input id="reg_apellido" class="in" placeholder="Perez" autocomplete="family-name"/>
+
+    <label>Correo</label>
+    <input id="reg_email" class="in" placeholder="correo@dominio.com" autocomplete="email"/>
+
+    <label>Contrasena</label>
+    <input id="reg_pass" type="password" class="in" placeholder="********" autocomplete="new-password"/>
+
+    <label>Cargo</label>
+    <select id="reg_charge" class="in">
+      <option value="">Seleccione cargo...</option>
+      <option value="operador">Operador</option>
+      <option value="jefe">Jefe</option>
+    </select>
+
+    <div id="campos_jefe" class="role-fields">
+      <label>Nombre de empresa</label>
+      <input id="reg_empresa" class="in" placeholder="Nombre de su empresa"/>
+      <label>Crear codigo de empresa</label>
+      <input id="reg_codigo" class="in" placeholder="Codigo que usaran sus operadores"/>
+    </div>
+
+    <div id="campos_operador" class="role-fields">
+      <label>Codigo de empresa</label>
+      <input id="reg_codigo_empresa" class="in" placeholder="Codigo proporcionado por su jefe"/>
+    </div>
+
+    <button id="btnRegister" class="btn mt-14">Registrarme</button>
+
+    <div class="row">
+      <span class="mut">Ya tienes cuenta?</span>
+      <a href="/">Iniciar sesion</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const apiUrl = path => (window.sicherApiUrl ? window.sicherApiUrl(path) : path);
+
+function apiErrorMessage(data, fallback) {
+  return data?.error || data?.detail?.error || data?.detail || fallback;
+}
+
+function showCamposRol() {
+  const cargo = $('#reg_charge').value;
+  $('#campos_jefe').style.display = cargo === 'jefe' ? 'block' : 'none';
+  $('#campos_operador').style.display = cargo === 'operador' ? 'block' : 'none';
+}
+
+async function registerUser() {
+  const btn = $('#btnRegister');
+  const err = $('#regErr');
+  const cargo = $('#reg_charge').value;
+  const payload = {
+    nombre: $('#reg_nombre').value.trim(),
+    apellido: $('#reg_apellido').value.trim(),
+    email: $('#reg_email').value.trim(),
+    password: $('#reg_pass').value.trim(),
+    charge: cargo,
+    codigo: cargo === 'jefe' ? $('#reg_codigo').value.trim() : $('#reg_codigo_empresa').value.trim(),
+    empresa_nombre: cargo === 'jefe' ? $('#reg_empresa').value.trim() : undefined
+  };
+
+  err.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const res = await fetch(apiUrl('/register'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      err.textContent = apiErrorMessage(data, 'Error al registrar.');
+      err.style.display = 'block';
+      return;
+    }
+
+    alert('Registro exitoso. Ahora inicia sesion.');
+    window.location.href = '/';
+  } catch (e) {
+    err.textContent = 'Error de conexion.';
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('#reg_charge').addEventListener('change', showCamposRol);
+$('#btnRegister').addEventListener('click', registerUser);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') registerUser();
+});
+</script>
+</body>
+</html>

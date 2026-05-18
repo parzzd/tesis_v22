@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Sistema de Deteccion</title>
+<link rel="stylesheet" href="/static/login.css?v=responsive-20260517"/>
+<script src="/config.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="shell">
+    <div class="logo">
+      <h1>Sistema de Seguridad</h1>
+    </div>
+
+    <h2>Iniciar sesion</h2>
+    <div id="err" class="err"></div>
+    <div id="tries" class="mut" style="display:none"></div>
+
+    <label>Correo</label>
+    <input id="email" class="in" placeholder="usuario@vigilia.io" autocomplete="username"/>
+
+    <label>Contrasena</label>
+    <input id="password" type="password" class="in" placeholder="********" autocomplete="current-password"/>
+    <div class="mt-14">
+          <button id="btn" class="btn">Iniciar sesion</button>
+        </div>
+    <div class="row">
+      <label class="mut remember-label">
+        <input id="remember" type="checkbox"/> Recuerdame
+      </label>
+      <a href="/register">Crear cuenta</a>
+    </div>
+
+    <div class="foot">
+      
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const tokenKey = 'sicher.token';
+const emailKey = 'sicher.email';
+const blockedAccessMessage = 'Usted no tiene permisos. Pida activacion a su jefe.';
+const apiUrl = path => (window.sicherApiUrl ? window.sicherApiUrl(path) : path);
+
+const remembered = localStorage.getItem(emailKey);
+if (remembered) {
+  $('#email').value = remembered;
+  $('#remember').checked = true;
+}
+
+async function doLogin() {
+  const btn = $('#btn');
+  const errBox = $('#err');
+
+  const email = $('#email').value.trim();
+  const password = $('#password').value;
+
+  btn.disabled = true;
+  errBox.style.display = 'none';
+
+  try {
+    const res = await fetch(apiUrl('/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    const data = await res.json();
+    const errorMessage = data.error || data.detail?.error || (res.status === 403 ? blockedAccessMessage : 'Credenciales invalidas.');
+    if (res.status === 403) {
+      errBox.textContent = errorMessage || blockedAccessMessage;
+      errBox.style.display = 'block';
+      btn.disabled = false;
+      return;
+    }
+
+    if (!res.ok) {
+      errBox.textContent = errorMessage;
+      errBox.style.display = 'block';
+      btn.disabled = false;
+      return;
+    }
+
+    if ($('#remember').checked) {
+      localStorage.setItem(emailKey, email);
+    } else {
+      localStorage.removeItem(emailKey);
+    }
+
+    const role = data.role || data.charge || 'operador';
+
+    localStorage.setItem(tokenKey, data.access_token);
+    localStorage.setItem('sicher.user_id', String(data.user_id || ''));
+    localStorage.setItem('sicher.email', data.email);
+    localStorage.setItem('sicher.nombre', data.nombre);
+    localStorage.setItem('sicher.apellido', data.apellido);
+    localStorage.setItem('sicher.role', role);
+    localStorage.setItem('sicher.charge', role);
+    localStorage.setItem('sicher.company_name', data.company_name || '');
+
+    if (role === 'jefe') {
+      window.location.href = '/admin';
+    } else {
+      window.location.href = '/dashboard';
+    }
+  } catch (e) {
+    errBox.textContent = 'Error de conexion.';
+    errBox.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('#btn').onclick = doLogin;
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+</script>
+</body>
+</html>
