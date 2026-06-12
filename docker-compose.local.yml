@@ -1,0 +1,15 @@
+# Compose para PROBAR EN LOCAL (Windows + Docker Desktop).
+# En Windows el "network_mode: host" del docker-compose.yml (pensado para EC2/Linux)
+# no expone los puertos, por eso aqui se mapean explicitamente.
+#   Uso:  docker compose -f docker-compose.local.yml up
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+    ports:
+      - "8554:8554"        # RTSP  (lo lee el backend)
+      - "8889:8889"        # WebRTC / WHIP  (publica el navegador)
+      - "8189:8189/udp"    # WebRTC ICE  (media)
+      - "8888:8888"        # HLS (opcional)
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml

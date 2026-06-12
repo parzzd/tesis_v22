@@ -1,0 +1,17 @@
+# Hosts que MediaMTX anuncia como candidatos WebRTC (ICE).
+# Local (Windows/Docker): 127.0.0.1.  En EC2: añade la IP PUBLICA de la instancia,
+# p.ej.  webrtcAdditionalHosts: [127.0.0.1, 54.x.x.x]
+webrtcAdditionalHosts: [127.0.0.1]
+
+# Solo permite publicar/leer con usuario y clave
+authInternalUsers:
+  - user: tesis
+    pass: tesis
+    permissions:
+      - action: publish      # el agente / navegador empuja
+      - action: read         # el backend lee
+  # No se define el usuario "any": al existir authInternalUsers,
+  # el acceso anonimo queda denegado por defecto.
+
+paths:
+  all_others:                # acepta cualquier ruta (clinica1, clinica2, ...)

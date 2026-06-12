@@ -296,6 +296,7 @@ button.sec { background: #334155; border-color: #475569 }
 }
 
 .frame {
+  position: relative;
   aspect-ratio: 16/9;
   width: 100%;
   background: #000;
@@ -307,6 +308,8 @@ button.sec { background: #334155; border-color: #475569 }
   width: 100%;
   height: 100%;
   object-fit: contain;
+  position: relative;
+  z-index: 2;
 }
 
 .stats {
@@ -554,6 +557,31 @@ button.sec { background: #334155; border-color: #475569 }
   opacity: 1;
 }
 .collapsible.hidden { max-height: 0; opacity: 0; margin: 0; padding: 0 }
+
+/* ===========================
+   WEBCAM (publicacion WHIP)
+=========================== */
+.webcam-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.webcam-controls .hidden { display: none }
+.webcam-controls #webcamStatus { flex: 1 1 100%; font-size: .85rem }
+.webcam-controls #webcamStatus.error { color: #e25555 }
+
+/* Video local (self-view) dentro de la tarjeta del grid. Queda detras del
+   <img> de frames del backend: sin modelo se ve la webcam; con frames del
+   backend (EC2) estos quedan encima. */
+.frame .webcam-selfview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 1;
+}
 
 /* ===========================
    FOOTER

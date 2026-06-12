@@ -1,0 +1,7 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+    network_mode: host          # expone 8554 (RTSP), 8888 (HLS), 8889 (WebRTC)
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml

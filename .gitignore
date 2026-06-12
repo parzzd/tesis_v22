@@ -24,6 +24,12 @@ env/
 *.sqlite3
 uvicorn_local*.log
 
+# Caches generados en runtime (definidos en sicher-api.service)
+.cache/
+
+# Salida del script de prueba de RTSP
+frame_test*.jpg
+
 data/raw/
 data/processed/
 data/features/

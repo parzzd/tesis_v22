@@ -34,6 +34,12 @@
         </div>
       </div>
 
+      <div class="webcam-controls mt-10">
+        <button type="button" id="btnWebcam" class="sec w-auto"> Usar mi webcam</button>
+        <button type="button" id="btnWebcamStop" class="sec w-auto hidden">Detener webcam</button>
+        <span id="webcamStatus" class="muted"></span>
+      </div>
+
       <div>
         <label>Ubicacion</label>
         <input id="cam_location" placeholder="Lobby principal - puerta norte" />
@@ -585,6 +591,198 @@ function startSessionMonitor() {
 }
 
 /* ===========================
+   WEBCAM -> MEDIAMTX (WHIP)
+=========================== */
+const WEBCAM_SERIAL = 'WEBCAM';
+const WEBCAM_LOCATION = 'webcam';
+const webcamState = { pc: null, stream: null, path: '', src: '', publishing: false };
+
+function setWebcamStatus(text, isError = false) {
+  const el = $('#webcamStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('error', !!isError);
+}
+
+function slugForPath(serial) {
+  const base = (serial || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return base ? `${base}-${suffix}` : `cam-${suffix}`;
+}
+
+// Espera a que termine la recoleccion de candidatos ICE (WHIP sin trickle).
+function waitForIceGathering(pc, timeoutMs = 4000) {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise(resolve => {
+    const done = () => {
+      pc.removeEventListener('icegatheringstatechange', check);
+      resolve();
+    };
+    const check = () => { if (pc.iceGatheringState === 'complete') done(); };
+    pc.addEventListener('icegatheringstatechange', check);
+    setTimeout(done, timeoutMs);
+  });
+}
+
+// Prefiere H264 en la publicacion: OpenCV/FFmpeg (lo que usa el backend para
+// leer el RTSP) decodifica H264 de forma fiable; VP8 sobre RTSP suele fallar.
+// Si el navegador no soporta H264, se queda con el codec por defecto.
+function preferH264(transceiver) {
+  try {
+    const getCaps = window.RTCRtpSender && RTCRtpSender.getCapabilities;
+    if (!transceiver.setCodecPreferences || !getCaps) return;
+    const caps = RTCRtpSender.getCapabilities('video');
+    if (!caps || !caps.codecs) return;
+    const h264 = caps.codecs.filter(c => /h264/i.test(c.mimeType));
+    if (!h264.length) return;
+    const rest = caps.codecs.filter(c => !/h264/i.test(c.mimeType));
+    transceiver.setCodecPreferences([...h264, ...rest]);
+  } catch (err) {
+    console.warn('No se pudo forzar H264, se usara el codec por defecto:', err);
+  }
+}
+
+async function startWebcamPublish() {
+  if (webcamState.publishing) return;
+  const cfg = window.sicherWebcamConfig ? window.sicherWebcamConfig() : null;
+  if (!cfg) return alert('Falta configuracion de MediaMTX');
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return alert('Tu navegador no permite acceder a la camara. Requiere HTTPS o localhost.');
+  }
+
+  const path = slugForPath($('#cam_serial').value.trim());
+  setWebcamStatus('Solicitando permiso de camara...');
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  } catch (err) {
+    setWebcamStatus('No se pudo acceder a la camara: ' + (err && err.message || err), true);
+    return;
+  }
+
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+
+  // Publica en modo solo-envio y prefiere H264 (ver preferH264).
+  const transceiver = pc.addTransceiver(stream.getVideoTracks()[0], { direction: 'sendonly' });
+  preferH264(transceiver);
+
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitForIceGathering(pc);
+
+    const headers = { 'Content-Type': 'application/sdp' };
+    if (cfg.user) headers['Authorization'] = 'Basic ' + btoa(`${cfg.user}:${cfg.pass}`);
+
+    setWebcamStatus('Conectando con el servidor de video...');
+    const whipUrl = `${cfg.whipBase}/${encodeURIComponent(path)}/whip`;
+    const res = await fetch(whipUrl, {
+      method: 'POST',
+      headers,
+      body: pc.localDescription.sdp
+    });
+    if (!res.ok) {
+      throw new Error(`WHIP respondio ${res.status} ${res.statusText}`);
+    }
+    const answerSdp = await res.text();
+    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+  } catch (err) {
+    stream.getTracks().forEach(t => t.stop());
+    pc.close();
+    setWebcamStatus('Error al publicar la webcam: ' + (err && err.message || err), true);
+    return;
+  }
+
+  const rtspUrl = cfg.rtspTemplate.replace('{path}', path);
+  webcamState.pc = pc;
+  webcamState.stream = stream;
+  webcamState.path = path;
+  webcamState.src = rtspUrl;
+  webcamState.publishing = true;
+
+  $('#btnWebcam').classList.add('hidden');
+  $('#btnWebcamStop').classList.remove('hidden');
+
+  // Registra y abre la webcam como una camara mas del grid de monitoreo.
+  await registerAndOpenWebcam(rtspUrl);
+
+  pc.addEventListener('connectionstatechange', () => {
+    if (['failed', 'disconnected', 'closed'].includes(pc.connectionState) && webcamState.publishing) {
+      setWebcamStatus('Conexion de webcam perdida (' + pc.connectionState + ')', true);
+    }
+  });
+}
+
+// Registra la webcam con valores por defecto (serial WEBCAM, ubicacion webcam),
+// la abre en el grid y muestra el video local dentro de su tarjeta.
+async function registerAndOpenWebcam(src) {
+  try {
+    const res = await fetch(apiUrl('/cameras'), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        serial_number: WEBCAM_SERIAL,
+        src,
+        location_description: WEBCAM_LOCATION
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setWebcamStatus(apiErrorMessage(err, 'No se pudo registrar la webcam'), true);
+      return;
+    }
+  } catch (err) {
+    setWebcamStatus('No se pudo registrar la webcam: ' + (err && err.message || err), true);
+    return;
+  }
+
+  await loadCameras();
+  openWS(WEBCAM_SERIAL, src, WEBCAM_LOCATION);
+  attachWebcamSelfView();
+  setWebcamStatus('Webcam en el grid de monitoreo como "' + WEBCAM_SERIAL + '".');
+}
+
+// Inserta el video local (self-view) detras del <img> de frames del backend.
+// Sin modelo (local) se ve la webcam; con frames del backend (EC2) estos
+// quedan encima.
+function attachWebcamSelfView() {
+  const card = document.getElementById(domId('card', WEBCAM_SERIAL));
+  if (!card || !webcamState.stream) return;
+  const frame = card.querySelector('.frame');
+  if (!frame) return;
+  let video = frame.querySelector('.webcam-selfview');
+  if (!video) {
+    video = document.createElement('video');
+    video.className = 'webcam-selfview';
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    frame.insertBefore(video, frame.firstChild);
+  }
+  video.srcObject = webcamState.stream;
+}
+
+function stopWebcamPublish() {
+  if (webcamState.stream) webcamState.stream.getTracks().forEach(t => t.stop());
+  if (webcamState.pc) webcamState.pc.close();
+  webcamState.pc = null;
+  webcamState.stream = null;
+  webcamState.path = '';
+  webcamState.src = '';
+  webcamState.publishing = false;
+
+  closeWS(WEBCAM_SERIAL, { removeCard: true, report: false });
+
+  $('#btnWebcam').classList.remove('hidden');
+  $('#btnWebcamStop').classList.add('hidden');
+  setWebcamStatus('Webcam detenida.');
+}
+
+/* ===========================
    CAMERAS CRUD
 =========================== */
 async function addCamera() {
@@ -1082,6 +1280,8 @@ function addAlert(msg) {
 =========================== */
 $('#btnLogout').onclick = logout;
 $('#btnAdd').onclick = addCamera;
+$('#btnWebcam').onclick = startWebcamPublish;
+$('#btnWebcamStop').onclick = stopWebcamPublish;
 $('#chkMuteAlert').addEventListener('change', setAlertSoundPreference);
 $('#btnToggleSidebar').addEventListener('click', toggleSidebar);
 $('#btnSaveOperatorModel').addEventListener('click', saveOperatorModelConfig);
