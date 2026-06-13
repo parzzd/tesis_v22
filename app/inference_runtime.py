@@ -3,11 +3,16 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
-os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+# Opciones de baja latencia para la lectura RTSP (TCP + sin buffer de entrada).
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay",
+)
 
 import cv2
 import joblib
@@ -163,8 +168,53 @@ def source_for_opencv(src: str) -> str | int:
 def open_video_capture(src: str) -> cv2.VideoCapture:
     source = source_for_opencv(src)
     if isinstance(source, int):
-        return cv2.VideoCapture(source)
-    return cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        cap = cv2.VideoCapture(source)
+    else:
+        cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+    # Buffer minimo: prioriza el frame mas reciente sobre los acumulados.
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    except Exception:
+        pass
+    return cap
+
+
+class LatestFrameReader:
+    """Lee la camara en un hilo y conserva solo el ULTIMO frame.
+
+    Evita la latencia que causa el buffer FIFO de OpenCV/RTSP: mientras el
+    modelo procesa un frame, este hilo sigue drenando la cola y guarda el mas
+    reciente, de modo que la inferencia siempre trabaje sobre video fresco.
+    """
+
+    def __init__(self, cap: cv2.VideoCapture) -> None:
+        self._cap = cap
+        self._lock = threading.Lock()
+        self._frame: np.ndarray | None = None
+        self._frame_id = 0
+        self._ok = True
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self) -> None:
+        while self._running:
+            ok, frame = self._cap.read()
+            if not ok:
+                with self._lock:
+                    self._ok = False
+                break
+            with self._lock:
+                self._frame = frame
+                self._frame_id += 1
+
+    def read_latest(self) -> tuple[bool, np.ndarray | None, int]:
+        with self._lock:
+            return self._ok, self._frame, self._frame_id
+
+    def stop(self) -> None:
+        self._running = False
+        self._thread.join(timeout=2.0)
 
 
 def encode_frame(frame: np.ndarray) -> str:
@@ -201,21 +251,29 @@ async def stream_camera(websocket: Any, serial_number: str, src: str, config_loa
     previous_timestamp: float | None = None
     previous_frame_features: dict[str, float] | None = None
     last_processed_at = 0.0
+    last_frame_id = -1
+    reader = LatestFrameReader(cap)
 
     try:
         while True:
-            ok, frame = await asyncio.to_thread(cap.read)
-            if not ok or frame is None:
-                await websocket.send_json({"type": "error", "serial_number": serial_number, "error": "Frame no disponible"})
-                break
-
             config = config_loader()
             fps = max(float(config.get("fps", 10.0)), 1.0)
-            now = time.time()
             interval = 1.0 / fps
-            if now - last_processed_at < interval:
+            elapsed = time.time() - last_processed_at
+            if elapsed < interval:
+                await asyncio.sleep(min(interval - elapsed, 0.05))
+                continue
+
+            ok, frame, frame_id = reader.read_latest()
+            if not ok:
+                await websocket.send_json({"type": "error", "serial_number": serial_number, "error": "Frame no disponible"})
+                break
+            if frame is None or frame_id == last_frame_id:
+                # Aun no hay un frame nuevo; espera brevemente.
                 await asyncio.sleep(0.005)
                 continue
+            last_frame_id = frame_id
+            now = time.time()
             last_processed_at = now
 
             try:
@@ -298,6 +356,7 @@ async def stream_camera(websocket: Any, serial_number: str, src: str, config_loa
                     break
                 await asyncio.sleep(0.25)
     finally:
+        reader.stop()
         cap.release()
         SESSION_STATUS[serial_number] = {
             **SESSION_STATUS.get(serial_number, {}),
