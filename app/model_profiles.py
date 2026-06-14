@@ -32,7 +32,7 @@ MODEL_PROFILES: dict[str, dict[str, Any]] = {
         "description": "Mayor resolucion para zonas criticas; consume mas GPU.",
         "recommended": False,
         "threshold": 0.49,
-        "fps": 25.0,
+        "fps": 10.0,
         "imgsz": 1280,
         "pose_model": "yolo11s-pose.pt",
         "feature_version": "v1",
